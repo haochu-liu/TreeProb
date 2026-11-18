@@ -1,0 +1,235 @@
+---
+title: "topology_only"
+format: html
+---
+
+# Topology-only distances between rooted trees
+
+We cover five main ways to measure how different two **rooted** trees are, looking only at their branching pattern. Branch lengths are ignored.
+
+## Setup and the example trees
+
+```{r}
+library(ape)
+
+t1 <- read.tree(text = "((A,B),(C,D));")      # the tree in your picture
+t2 <- read.tree(text = "((A,C),(B,D));")      # same shape, different pairing
+t3 <- read.tree(text = "(((A,B),C),D);")      # ladder shape
+ta <- read.tree(text = "(A,(B,(C,(D,E))));")  # rogue-leaf example, before ...
+tb <- read.tree(text = "(B,(C,(D,(E,A))));")  # ... and after moving only leaf A
+
+stopifnot(is.rooted(t1), is.rooted(t2), is.rooted(t3), is.rooted(ta), is.rooted(tb))
+par(mfrow = c(1, 3)); plot(t1); plot(t2); plot(t3)
+par(mfrow = c(1, 2)); plot(ta); plot(tb)
+```
+
+## 1. Robinson–Foulds (RF) distance
+
+Count the clusters that are in one tree but not in the other:
+$$
+d_{RF}(T_1, T_2) = |\,C(T_1) \setminus C(T_2)\,| + |\,C(T_2) \setminus C(T_1)\,|
+$$
+where *C(T)* is the set of non-trivial clusters of *T*. For binary rooted trees the maximum is 2(*n* − 2) (in each tree, there are n - 1 internal nodes, and n - 2 partitions), so
+$$
+d_{RF}^{norm} = \frac{d_{RF}}{2(n-2)} \in [0, 1].
+$$
+```{r}
+library(phangorn)
+RF.dist(t1, t2, rooted = TRUE, normalize = TRUE)
+RF.dist(t1, t3, rooted = TRUE, normalize = TRUE)
+RF.dist(ta, tb, rooted = TRUE, normalize = TRUE)
+```
+
+## 2. Triplet distance
+
+Any 3 leaves {x, y, z} of a binary rooted tree are resolved in exactly one of three ways: **xy\|z**, **xz\|y** or **yz\|x**.
+Here xy\|z means x and y share a more recent common ancestor with each other than either does with z.
+The triplet distance counts the 3-leaf subsets that the two trees resolve differently (Critchlow, Pearl & Qian 1996):
+
+$$
+d_{trip}(T_1, T_2) = \#\{\{x,y,z\} : T_1|_{xyz} \neq T_2|_{xyz}\}, \qquad
+d_{trip}^{norm} = d_{trip} \Big/ \binom{n}{3}.
+$$
+```{r}
+cluster_sets <- function(tree) {
+  pp   <- prop.part(tree)                 # one entry per internal node
+  labs <- attr(pp, "labels")
+  cl   <- lapply(pp, function(i) sort(labs[i]))
+  cl[lengths(cl) < length(labs)]          # remove the root cluster
+}
+cluster_strings <- function(tree) {
+  vapply(cluster_sets(tree), function(x) paste0("{", paste(x, collapse = ","), "}"), "")
+}
+triplet_resolution <- function(tree, trip) {
+  cl <- cluster_strings(keep.tip(tree, trip))  # the 2-leaf cluster, if any
+  if (length(cl) == 0) return("unresolved")
+  paste0(gsub("[{},]", "", cl), "|", setdiff(trip, strsplit(gsub("[{}]", "", cl), ",")[[1]]))
+}
+
+triplet_table <- function(tr1, tr2) {
+  trips <- combn(sort(tr1$tip.label), 3, simplify = FALSE)
+  data.frame(
+    triplet = vapply(trips, paste, "", collapse = ""),
+    tree1   = vapply(trips, function(x) triplet_resolution(tr1, x), ""),
+    tree2   = vapply(trips, function(x) triplet_resolution(tr2, x), "")
+  ) |> transform(differs = tree1 != tree2)
+}
+
+triplet_distance <- function(tr1, tr2, normalise = FALSE) {
+  tab <- triplet_table(tr1, tr2)
+  if (normalise) mean(tab$differs) else sum(tab$differs)
+}
+
+triplet_table(t1, t3)
+triplet_distance(t1, t3, normalise = TRUE)
+triplet_distance(ta, tb, normalise = TRUE)
+```
+
+## 3. Generalized Robinson–Foulds
+
+$$
+d_{GRF}(T_1, T_2) = |C(T_1)| + |C(T_2)| - 2 \times (\text{total similarity of the best matching}).
+$$
+If the similarity is 1 for identical clusters and 0 otherwise, this formula gives back ordinary RF exactly. Smith (2020) recommends **clustering information distance (CID)** as the method for similarity.
+```{r}
+library(TreeDist)
+TreeDistance(t1, t3)
+TreeDistance(ta, tb)
+
+VisualizeMatching(ClusteringInfoDistance, t1, t3)
+VisualizeMatching(ClusteringInfoDistance, ta, tb)
+```
+
+## 4. Path-difference distance
+
+For every pair of leaves *i*, *j*, count the edges on the path between them, $p_T(i,j)$. Collect these counts into a vector for each tree and take the Euclidean distance (Steel & Penny 1993):
+$$
+d_{path}(T_1,T_2) = \sqrt{\sum_{i<j} \big(p_{T_1}(i,j) - p_{T_2}(i,j)\big)^2 },
+$$
+where
+$$
+p_T(i,j) = \text{depth}(i) + \text{depth}(j) - 2\,\text{depth}(\text{MRCA}(i,j)),
+$$
+```{r}
+edge_count_matrix <- function(tree) cophenetic(compute.brlen(tree, 1))
+path_difference <- function(tr1, tr2) {
+  d1 <- edge_count_matrix(tr1)
+  d2 <- edge_count_matrix(tr2)[rownames(d1), colnames(d1)]   # align leaf order
+  sqrt(sum((d1[upper.tri(d1)] - d2[upper.tri(d2)])^2))
+}
+
+path_difference(t1, t2)
+path_difference(t1, t3)
+```
+
+## 5. Rearrangement distances
+
+Define a "move" that changes a tree a little. The distance is the **minimum number of moves** needed to turn T₁ into T₂.
+
+**Rooted NNI (nearest-neighbour interchange).** Pick an internal node *u* (not the root) with children *c₁*, *c₂*, and let *s* be its sibling. Swap *s* with *c₁* or with *c₂*:
+```         
+        p                      p                      p
+       / \                    / \                    / \
+      u   s       NNI        u'  c1        or       u'  c2
+     / \         ---->      / \                    / \
+   c1   c2                 s   c2                c1   s
+```
+
+Each rooted NNI changes exactly one cluster. That gives a useful bound: **NNI distance ≥ RF / 2**.
+
+**Rooted SPR (subtree prune and regraft).** Cut off any subtree and re-attach it on any other edge, including a new edge above the current root:
+```         
+       +---+---+                    +---+---+                       +---+---+
+     +-+-+   +-+-+   prune D      +-+-+     |    regraft D        +-+-+     |
+     A   B   C   D   -------->    A   B     C    above root ->  +-+-+ |     D
+                                                                A   B C
+     t1 = ((A,B),(C,D))                                         t3 = (((A,B),C),D)
+```
+Every NNI is a special SPR, so **SPR distance ≤ NNI distance**.
+
+`phangorn::SPR.dist` only available for unrooted trees. The computational cost of these two methods can be large.
+```{r}
+# Trees as nested lists: a leaf is a string, an internal node is list(left, right)
+as_nested <- function(phy) {
+  stopifnot(is.binary(phy), is.rooted(phy))
+  rec <- function(node) {
+    if (node <= Ntip(phy)) return(phy$tip.label[node])
+    kids <- phy$edge[phy$edge[, 1] == node, 2]
+    list(rec(kids[1]), rec(kids[2]))
+  }
+  rec(Ntip(phy) + 1)
+}
+canon <- function(x) {                     # canonical Newick: same tree -> same string
+  if (is.character(x)) return(x)
+  s <- sort(c(canon(x[[1]]), canon(x[[2]])))
+  paste0("(", s[1], ",", s[2], ")")
+}
+get_at <- function(x, p) { for (i in p) x <- x[[i]]; x }
+set_at <- function(x, p, value) {
+  if (length(p) == 0) return(value)
+  x[[p[1]]] <- set_at(x[[p[1]]], p[-1], value); x
+}
+all_paths <- function(x, prefix = integer(0)) {
+  if (is.character(x)) return(list(prefix))
+  c(list(prefix), all_paths(x[[1]], c(prefix, 1L)), all_paths(x[[2]], c(prefix, 2L)))
+}
+
+# rooted SPR: cut any non-root subtree, re-attach on any edge of the rest (or above the root)
+spr_neighbours <- function(x) {
+  out <- list()
+  for (p in all_paths(x)[-1]) {
+    sub  <- get_at(x, p)
+    par  <- p[-length(p)]; sib <- c(par, 3L - p[length(p)])
+    rest <- set_at(x, par, get_at(x, sib))             # prune
+    for (q in all_paths(rest)) {
+      out[[length(out) + 1]] <- set_at(rest, q, list(get_at(rest, q), sub))  # regraft
+    }
+  }
+  out
+}
+
+# rooted NNI: for internal node u = (c1,c2) with sibling s, swap s with c1 or c2
+nni_neighbours <- function(x) {
+  out <- list()
+  for (p in all_paths(x)[-1]) {
+    u <- get_at(x, p)
+    if (is.character(u)) next
+    par <- p[-length(p)]; s <- get_at(x, c(par, 3L - p[length(p)]))
+    out[[length(out) + 1]] <- set_at(x, par, list(list(s, u[[2]]), u[[1]]))
+    out[[length(out) + 1]] <- set_at(x, par, list(list(u[[1]], s), u[[2]]))
+  }
+  out
+}
+
+# breadth-first search from tr1 until tr2 is reached
+rearrangement_distance <- function(tr1, tr2, move = c("spr", "nni")) {
+  neighbours <- switch(match.arg(move), spr = spr_neighbours, nni = nni_neighbours)
+  start <- as_nested(tr1); goal <- canon(as_nested(tr2))
+  if (canon(start) == goal) return(0)
+  seen <- new.env(); assign(canon(start), TRUE, envir = seen)
+  frontier <- list(start); d <- 0
+  while (length(frontier) > 0) {
+    d <- d + 1; nxt <- list()
+    for (x in frontier) for (y in neighbours(x)) {
+      key <- canon(y)
+      if (key == goal) return(d)
+      if (!exists(key, envir = seen, inherits = FALSE)) {
+        assign(key, TRUE, envir = seen); nxt[[length(nxt) + 1]] <- y
+      }
+    }
+    frontier <- nxt
+  }
+  Inf
+}
+
+rearrangement_distance(t1, t2, "spr")
+rearrangement_distance(t1, t2, "nni")
+rearrangement_distance(ta, tb, "spr")
+rearrangement_distance(ta, tb, "nni")
+```
+
+## Which one to use?
+
+SPR seems the most suitable to measure how recombination events change trees. Triplet distance and GRF might also be useful.
+
+
