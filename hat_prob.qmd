@@ -1,0 +1,13 @@
+---
+title: "hat_prob"
+format: html
+---
+
+```{r}
+source("states_transition.R")
+source("hat_transition.R")
+```
+
+# Transition matrix and the probability of equal tree length
+
+
