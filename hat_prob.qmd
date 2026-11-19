@@ -48,12 +48,55 @@ prob_equal_n2 <- function(rho) {
 }
 
 rho_seq <- seq(from=0, to=20, by=0.1)
-prob_seq <- prob_equal_n2(rho_seq)
-plot(rho_seq, prob_seq, xlab="rho", ylab="P(T1 = T2)", main="n=2", type="l")
+true_prob <- prob_equal_n2(rho_seq)
+plot(rho_seq, true_prob, xlab="rho", ylab="P(T1 = T2)", main="n=2", type="l")
 ```
 
-## Probability when n > 2
+## Transition matrix and the probability when n > 2
 
+The transition matrix is constructed by functions in `states_transition.R`.
+```{r}
+P2 <- arg_transition_matrix(2, symbolic = TRUE) # = Eq. (2)
+print(noquote(unclass(P2)[, ]))
+P3 <- arg_transition_matrix(3, symbolic = TRUE)
+print(noquote(unclass(P3)[, ]))
+```
 
+```{r}
+P2 <- arg_transition_matrix(2, rho=0.5) # = Eq. (2)
+print(noquote(unclass(P2)[, ]))
+P3 <- arg_transition_matrix(3, rho=1)
+print(noquote(unclass(P3)[, ]))
+```
+
+When $n > 2$, we might want the probability of $\mathcal{T}_l = \mathcal{T}_c$ instead of just equal heights. Follow the proof of theorem 2, the probability is derived from $\hat{P}$. Code to compute $\hat{P}$ is in `hat_transition.R`.
+```{r}
+P2 <- arg_transition_matrix(2, symbolic = TRUE)
+P2_hat <- transition_hat(2, P2)
+print(noquote(unclass(P2_hat)[, ]))
+P3 <- arg_transition_matrix(3, symbolic = TRUE)
+P3_hat <- transition_hat(3, P3)
+print(noquote(unclass(P3_hat)[, ]))
+```
+
+Then the probability of equal trees is computed by diagonalisation of $\hat{P}$.
+```{r}
+matrix_prob <- c()
+for (i in 1:length(sparse_rho)) {
+  rho <- sparse_rho[i]
+  P <- arg_transition_matrix(2, rho=rho)
+  P_hat <- transition_hat(2, P)
+  eig <- eigen(P_hat)
+  if (!all(abs(eig$values) <= 1)) {print("Eigenvalue larger than 1!")}
+  diag_inf <- as.integer(abs(eig$values) >= 1)
+  V <- eig$vectors
+  D <- diag(diag_inf)
+  P_hat_inf <- V %*% D %*% solve(V)
+  matrix_prob <- c(matrix_prob, P_hat_inf[1, 4]) 
+}
+
+plot(rho_seq, true_prob, xlab="rho", ylab="P(T1 = T2)", main="n=2", type="l")
+plot(sparse_rho, matrix_prob)
+```
 
 
