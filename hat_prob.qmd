@@ -8,6 +8,52 @@ source("states_transition.R")
 source("hat_transition.R")
 ```
 
-# Transition matrix and the probability of equal tree length
+# Transition matrix and the probability of equal tree height
+
+## Number of valid states
+
+When $n > 2$, we always have $(i, j, k)$ satisfying:
+$$
+\begin{cases}
+1 \leq i + k \leq n,\\
+1 \leq j + k \leq n,\\
+0 \leq i, j, k.
+\end{cases}
+$$
+We have the number of states equals to
+$$
+\frac{n(2n^2 + 9n + 1)}{6}.
+$$
+```{r}
+num_states <- function(n) {
+  n * (2 * n^2 + 9 * n + 1) / 6
+}
+
+cat("n=2, num of states =", num_states(2), "\n")
+cat("n=2, num of states =", num_states(3))
+n_seq <- 2:20
+num_seq <- num_states(n_seq)
+plot(n_seq, num_seq, xlab="n", ylab="number of states")
+```
+
+## Probability of equal tree height
+
+When $n=2$, let the tree heights to be $T_l$ and $T_c$, Simonsen and Churchill 1997 paper have their theorem 2:
+$$
+P(T_l = T_c) = \frac{9+\rho}{9 + 13\rho + 2\rho^2}.
+$$
+```{r}
+prob_equal_n2 <- function(rho) {
+  (9 + rho) / (9 + 13*rho + 2*rho^2)
+}
+
+rho_seq <- seq(from=0, to=20, by=0.1)
+prob_seq <- prob_equal_n2(rho_seq)
+plot(rho_seq, prob_seq, xlab="rho", ylab="P(T1 = T2)", main="n=2", type="l")
+```
+
+## Probability when n > 2
+
+
 
 
