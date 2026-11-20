@@ -25,14 +25,12 @@ par(mfrow = c(1, 2)); plot(ta); plot(tb)
 
 ## 1. Robinson–Foulds (RF) distance
 
-Count the clusters that are in one tree but not in the other:
-$$
+Count the clusters that are in one tree but not in the other: $$
 d_{RF}(T_1, T_2) = |\,C(T_1) \setminus C(T_2)\,| + |\,C(T_2) \setminus C(T_1)\,|
-$$
-where *C(T)* is the set of non-trivial clusters of *T*. For binary rooted trees the maximum is 2(*n* − 2) (in each tree, there are n - 1 internal nodes, and n - 2 partitions), so
-$$
+$$ where *C(T)* is the set of non-trivial clusters of *T*. For binary rooted trees the maximum is 2(*n* − 2) (in each tree, there are n - 1 internal nodes, and n - 2 partitions), so $$
 d_{RF}^{norm} = \frac{d_{RF}}{2(n-2)} \in [0, 1].
 $$
+
 ```{r}
 library(phangorn)
 RF.dist(t1, t2, rooted = TRUE, normalize = TRUE)
@@ -42,14 +40,13 @@ RF.dist(ta, tb, rooted = TRUE, normalize = TRUE)
 
 ## 2. Triplet distance
 
-Any 3 leaves {x, y, z} of a binary rooted tree are resolved in exactly one of three ways: **xy\|z**, **xz\|y** or **yz\|x**.
-Here xy\|z means x and y share a more recent common ancestor with each other than either does with z.
-The triplet distance counts the 3-leaf subsets that the two trees resolve differently (Critchlow, Pearl & Qian 1996):
+Any 3 leaves {x, y, z} of a binary rooted tree are resolved in exactly one of three ways: **xy\|z**, **xz\|y** or **yz\|x**. Here xy\|z means x and y share a more recent common ancestor with each other than either does with z. The triplet distance counts the 3-leaf subsets that the two trees resolve differently (Critchlow, Pearl & Qian 1996):
 
 $$
 d_{trip}(T_1, T_2) = \#\{\{x,y,z\} : T_1|_{xyz} \neq T_2|_{xyz}\}, \qquad
 d_{trip}^{norm} = d_{trip} \Big/ \binom{n}{3}.
 $$
+
 ```{r}
 cluster_sets <- function(tree) {
   pp   <- prop.part(tree)                 # one entry per internal node
@@ -89,8 +86,8 @@ triplet_distance(ta, tb, normalise = TRUE)
 
 $$
 d_{GRF}(T_1, T_2) = |C(T_1)| + |C(T_2)| - 2 \times (\text{total similarity of the best matching}).
-$$
-If the similarity is 1 for identical clusters and 0 otherwise, this formula gives back ordinary RF exactly. Smith (2020) recommends **clustering information distance (CID)** as the method for similarity.
+$$ If the similarity is 1 for identical clusters and 0 otherwise, this formula gives back ordinary RF exactly. Smith (2020) recommends **clustering information distance (CID)** as the method for similarity.
+
 ```{r}
 library(TreeDist)
 TreeDistance(t1, t3)
@@ -102,14 +99,12 @@ VisualizeMatching(ClusteringInfoDistance, ta, tb)
 
 ## 4. Path-difference distance
 
-For every pair of leaves *i*, *j*, count the edges on the path between them, $p_T(i,j)$. Collect these counts into a vector for each tree and take the Euclidean distance (Steel & Penny 1993):
-$$
+For every pair of leaves *i*, *j*, count the edges on the path between them, $p_T(i,j)$. Collect these counts into a vector for each tree and take the Euclidean distance (Steel & Penny 1993): $$
 d_{path}(T_1,T_2) = \sqrt{\sum_{i<j} \big(p_{T_1}(i,j) - p_{T_2}(i,j)\big)^2 },
-$$
-where
-$$
+$$ where $$
 p_T(i,j) = \text{depth}(i) + \text{depth}(j) - 2\,\text{depth}(\text{MRCA}(i,j)),
 $$
+
 ```{r}
 edge_count_matrix <- function(tree) cophenetic(compute.brlen(tree, 1))
 path_difference <- function(tr1, tr2) {
@@ -127,6 +122,7 @@ path_difference(t1, t3)
 Define a "move" that changes a tree a little. The distance is the **minimum number of moves** needed to turn T₁ into T₂.
 
 **Rooted NNI (nearest-neighbour interchange).** Pick an internal node *u* (not the root) with children *c₁*, *c₂*, and let *s* be its sibling. Swap *s* with *c₁* or with *c₂*:
+
 ```         
         p                      p                      p
        / \                    / \                    / \
@@ -138,6 +134,7 @@ Define a "move" that changes a tree a little. The distance is the **minimum numb
 Each rooted NNI changes exactly one cluster. That gives a useful bound: **NNI distance ≥ RF / 2**.
 
 **Rooted SPR (subtree prune and regraft).** Cut off any subtree and re-attach it on any other edge, including a new edge above the current root:
+
 ```         
        +---+---+                    +---+---+                       +---+---+
      +-+-+   +-+-+   prune D      +-+-+     |    regraft D        +-+-+     |
@@ -145,9 +142,11 @@ Each rooted NNI changes exactly one cluster. That gives a useful bound: **NNI di
                                                                 A   B C
      t1 = ((A,B),(C,D))                                         t3 = (((A,B),C),D)
 ```
+
 Every NNI is a special SPR, so **SPR distance ≤ NNI distance**.
 
 `phangorn::SPR.dist` only available for unrooted trees. The computational cost of these two methods can be large.
+
 ```{r}
 # Trees as nested lists: a leaf is a string, an internal node is list(left, right)
 as_nested <- function(phy) {
@@ -231,5 +230,3 @@ rearrangement_distance(ta, tb, "nni")
 ## Which one to use?
 
 SPR seems the most suitable to measure how recombination events change trees. Triplet distance and GRF might also be useful.
-
-

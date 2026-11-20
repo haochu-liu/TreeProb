@@ -6,31 +6,32 @@ format: html
 ```{r}
 source("states_transition.R")
 source("hat_transition.R")
+source("limit_power.R")
+library(ggplot2)
+library(dplyr)
 ```
 
 # Transition matrix and the probability of equal tree height
 
 ## Number of valid states
 
-When $n > 2$, we always have $(i, j, k)$ satisfying:
-$$
+When $n > 2$, we always have $(i, j, k)$ satisfying: $$
 \begin{cases}
 1 \leq i + k \leq n,\\
 1 \leq j + k \leq n,\\
 0 \leq i, j, k.
 \end{cases}
-$$
-We have the number of states equals to
-$$
+$$ We have the number of states equals to $$
 \frac{n(2n^2 + 9n + 1)}{6}.
 $$
+
 ```{r}
 num_states <- function(n) {
   n * (2 * n^2 + 9 * n + 1) / 6
 }
 
 cat("n=2, num of states =", num_states(2), "\n")
-cat("n=2, num of states =", num_states(3))
+cat("n=3, num of states =", num_states(3))
 n_seq <- 2:20
 num_seq <- num_states(n_seq)
 plot(n_seq, num_seq, xlab="n", ylab="number of states")
@@ -38,23 +39,24 @@ plot(n_seq, num_seq, xlab="n", ylab="number of states")
 
 ## Probability of equal tree height
 
-When $n=2$, let the tree heights to be $T_l$ and $T_c$, Simonsen and Churchill 1997 paper have their theorem 2:
-$$
+When $n=2$, let the tree heights to be $T_l$ and $T_c$, Simonsen and Churchill 1997 paper have their theorem 2: $$
 P(T_l = T_c) = \frac{9+\rho}{9 + 13\rho + 2\rho^2}.
 $$
+
 ```{r}
 prob_equal_n2 <- function(rho) {
   (9 + rho) / (9 + 13*rho + 2*rho^2)
 }
 
-rho_seq <- seq(from=0, to=20, by=0.1)
+rho_seq <- seq(from=0.2, to=10, by=0.2)
 true_prob <- prob_equal_n2(rho_seq)
 plot(rho_seq, true_prob, xlab="rho", ylab="P(T1 = T2)", main="n=2", type="l")
 ```
 
-## Transition matrix and the probability when n > 2
+## Transition matrix and the probability when n \> 2
 
 The transition matrix is constructed by functions in `states_transition.R`.
+
 ```{r}
 P2 <- arg_transition_matrix(2, symbolic = TRUE) # = Eq. (2)
 print(noquote(unclass(P2)[, ]))
@@ -70,6 +72,7 @@ print(noquote(unclass(P3)[, ]))
 ```
 
 When $n > 2$, we might want the probability of $\mathcal{T}_l = \mathcal{T}_c$ instead of just equal heights. Follow the proof of theorem 2, the probability is derived from $\hat{P}$. Code to compute $\hat{P}$ is in `hat_transition.R`.
+
 ```{r}
 P2 <- arg_transition_matrix(2, symbolic = TRUE)
 P2_hat <- transition_hat(2, P2)
@@ -80,23 +83,162 @@ print(noquote(unclass(P3_hat)[, ]))
 ```
 
 Then the probability of equal trees is computed by diagonalisation of $\hat{P}$.
+
 ```{r}
 matrix_prob <- c()
-for (i in 1:length(sparse_rho)) {
-  rho <- sparse_rho[i]
+for (i in 1:length(rho_seq)) {
+  rho <- rho_seq[i]
   P <- arg_transition_matrix(2, rho=rho)
   P_hat <- transition_hat(2, P)
-  eig <- eigen(P_hat)
-  if (!all(abs(eig$values) <= 1)) {print("Eigenvalue larger than 1!")}
-  diag_inf <- as.integer(abs(eig$values) >= 1)
-  V <- eig$vectors
-  D <- diag(diag_inf)
-  P_hat_inf <- V %*% D %*% solve(V)
-  matrix_prob <- c(matrix_prob, P_hat_inf[1, 4]) 
+  P_hat_inf <- limit_power(P_hat)
+  matrix_prob <- c(matrix_prob, P_hat_inf[1, 4])
 }
 
-plot(rho_seq, true_prob, xlab="rho", ylab="P(T1 = T2)", main="n=2", type="l")
-plot(sparse_rho, matrix_prob)
+plot(rho_seq, true_prob,
+     type = "l", lwd = 3, col = "steelblue",
+     xlab = expression(rho),
+     ylab = expression(P(T[1] == T[2])),
+     main = "n = 2",
+     las = 1)
+grid()
+points(rho_seq, matrix_prob,
+       pch = 1, col = "firebrick", lwd = 1.8, cex = 1.1)
+
+legend("topright",
+       legend = c("True Probability", "Matrix Transition"),
+       col = c("steelblue", "firebrick"),
+       lwd = c(3, 1.8),
+       lty = c(1, NA),
+       pch = c(NA, 1),
+       bty = "n")
 ```
 
+```{r}
+prob_grid <- matrix(NA, nrow=length(rho_seq), ncol=length(n_seq))
+for (i in 1:length(n_seq)) {
+  n <- n_seq[i]
+  for (j in 1:length(rho_seq)) {
+    rho <- rho_seq[j]
+    
+    P <- arg_transition_matrix(n, rho=rho)
+    P_hat <- transition_hat(n, P)
+    P_hat_inf <- limit_power(P_hat)
+    prob_grid[j, i] <- P_hat_inf[1, ncol(P_hat_inf)]
+  }
+  cat("finish n =", n, "\n")
+}
+```
 
+```{r}
+colnames(prob_grid) <- n_seq
+rownames(prob_grid) <- rho_seq
+
+df <- as.data.frame(as.table(prob_grid))
+colnames(df) <- c("Row", "Col", "Value")
+
+df_num <- df |>
+  mutate(
+    Col = as.numeric(as.character(Col)),
+    Row = as.numeric(as.character(Row))
+  )
+
+ggplot(df_num, aes(x = Col, y = Row)) +
+  geom_tile(aes(fill = Value)) +                      # Map fill only to the tiles
+  geom_contour(
+    aes(z = Value),
+    breaks = c(0.05, 0.1, 0.25, 0.5),
+    color = "white",
+    alpha = 0.6,
+    linewidth = 0.35
+  ) +
+  scale_x_continuous(
+    breaks = seq(2, 20, by = 2),
+    expand = c(0, 0)
+  ) +
+  scale_y_reverse(
+    breaks = seq(0, 10, by = 1),
+    expand = c(0, 0)
+  ) +
+  scale_fill_viridis_c(
+    option = "viridis",
+    trans = "sqrt",
+    breaks = c(0.01, 0.05, 0.1, 0.25, 0.5, 0.75),
+    labels = scales::label_number(accuracy = 0.01)
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    legend.key.height = unit(1.2, "cm")
+  ) +
+  labs(
+    x = "n",
+    y = "rho",
+    fill = "Probability"
+  )
+```
+
+```{r}
+rho_seq_log <- 10^c(-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5)
+prob_grid2 <- matrix(NA, nrow=length(rho_seq_log), ncol=length(n_seq))
+for (i in 1:length(n_seq)) {
+  n <- n_seq[i]
+  for (j in 1:length(rho_seq_log)) {
+    rho <- rho_seq_log[j]
+    
+    P <- arg_transition_matrix(n, rho=rho)
+    P_hat <- transition_hat(n, P)
+    P_hat_inf <- limit_power(P_hat)
+    prob_grid2[j, i] <- P_hat_inf[1, ncol(P_hat_inf)]
+  }
+  cat("finish n =", n, "\n")
+}
+```
+
+```{r}
+colnames(prob_grid2) <- n_seq
+rownames(prob_grid2) <- rho_seq_log
+
+df <- as.data.frame(as.table(prob_grid2))
+colnames(df) <- c("Row", "Col", "Value")
+
+df_num <- df |>
+  mutate(
+    Col = as.numeric(as.character(Col)),
+    Row = as.numeric(as.character(Row))
+  )
+
+ggplot(df_num, aes(x = Col, y = Row)) +
+  geom_tile(aes(fill = Value)) +
+  geom_contour(
+    aes(z = Value),
+    breaks = c(0.05, 0.1, 0.25, 0.5),
+    color = "white",
+    alpha = 0.6,
+    linewidth = 0.35
+  ) +
+  scale_x_continuous(
+    breaks = seq(2, 20, by = 2),
+    expand = c(0, 0)
+  ) +
+  scale_y_log10(
+    breaks = scales::breaks_log(),
+    labels = scales::label_log(),
+    expand = c(0, 0)
+  ) +
+  scale_fill_viridis_c(
+    option = "viridis",
+    transform = "sqrt",
+    breaks = c(0.01, 0.05, 0.1, 0.25, 0.5, 0.75),
+    labels = scales::label_number(accuracy = 0.01)
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    legend.key.height = unit(1.2, "cm")
+  ) +
+  labs(
+    x = "n",
+    y = "rho",
+    fill = "Probability"
+  )
+```
