@@ -195,8 +195,10 @@ arg_transition_matrix_full <- function(n, rho = 1, symbolic = FALSE, sparse = FA
   from <- to <- integer(0); c0 <- cr <- numeric(0)
   for (m in moves) {
     use <- which(live & (m$c0 + m$cr) > 0)
-    from <- c(from, use); to <- c(to, use + m$shift)
-    c0 <- c(c0, m$c0[use]); cr <- c(cr, m$cr[use])
+    from <- c(from, use)
+    to   <- c(to,   use + m$shift)
+    c0 <- c(c0, m$c0[use])
+    cr <- c(cr, m$cr[use])
   }
   stopifnot(all(s$valid[to]))                          # never lands on padding
   lab <- rownames(s)
@@ -246,4 +248,11 @@ if (sys.nframe() == 0) {
   print(noquote(unclass(P2_full)[, ]))
   ## back to the old matrix
   print(identical(unclass(full_to_old(P2_full))[, ], unclass(P2)[, ]))
+  
+  P3_full <- arg_transition_matrix_full(3, rho = 0.5)
+  for (i in 1:ncol(P3_full)) {
+    formula_col <- P_entry(1:nrow(P3_full), i, 3, 0.5)
+    formula_col[is.na(formula_col)] <- 0
+    print(all(P3_full[, i] == formula_col))
+  }
 }
