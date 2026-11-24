@@ -119,29 +119,24 @@ arg_transition_matrix <- function(n, rho = 1, symbolic = FALSE) {
   paste0(num, "/(", den, ")")
 }
 
+
 ## ===========================================================================
-## Padded "box" numbering with an explicit entry formula
+## Full transition matrix with an explicit entry formula
 ## ===========================================================================
 ## Coordinates: a = i + k (left lineages), b = j + k (right lineages), k.
-## Every (a, b, k) with 1 <= a, b <= n and 0 <= k <= n gets a position
-##     r = (a - 1) n (n + 1) + (b - 1)(n + 1) + k + 1,   r = 1, ..., n^2 (n + 1),
-## i.e. lexicographic order in (a, b, k) with k fastest.  Positions with
-## k > min(a, b) (i.e. i < 0 or j < 0) are padding, not real states; their
-## rows and columns are all zero.  No real state moves to a padding position.
-## Each move is a fixed shift in r, so the non-zeros lie on five diagonals:
-##   Re  (k-1)              : c = r - 1,             weight k rho
-##   C2  (k+1)              : c = r + 1,             weight (a-k)(b-k)
-##   Cl1+Cl3 (a-1)          : c = r - n(n+1),        weight C(a,2) - C(k,2)
-##   Cr1+Cr3 (b-1)          : c = r - (n+1),         weight C(b,2) - C(k,2)
-##   C4  (a-1, b-1, k-1)    : c = r - n(n+1) - n - 2, weight C(k,2)
-## all divided by D = C(a + b - k, 2) + k rho.  The MRCA (0,0,1) is position
-## r = 2 and is absorbing; the start state (0,0,n) is the last position.
+## Accept every (a, b, k) with 1 <= a, b <= n and 0 <= k <= n,
+##     r = (a - 1) n (n + 1) + (b - 1)(n + 1) + k + 1, r = 1, ..., n^2 (n + 1).
+## Positions with k > min(a, b) (i.e. i < 0 or j < 0) are padding,
+## not real states; their rows and columns are all zero.
+## No real state moves to a padding position.
+## The absorbing state (0,0,1) has position r = 2;
+## the start state (0,0,n) is the last position.
 
-## (a, b, k) -> r   (vectorised)
-box_index <- function(a, b, k, n) (a - 1) * n * (n + 1) + (b - 1) * (n + 1) + k + 1
+## (a, b, k) -> r
+state_to_index <- function(a, b, k, n) (a - 1)*n*(n + 1) + (b - 1)*(n + 1) + k + 1
 
-## r -> (a, b, k, i, j, valid)   (vectorised)
-box_state <- function(r, n) {
+## r -> (a, b, k, i, j, valid)
+index_to_state <- function(r, n) {
   a <- (r - 1) %/% (n * (n + 1)) + 1
   b <- ((r - 1) %% (n * (n + 1))) %/% (n + 1) + 1
   k <- (r - 1) %% (n + 1)
@@ -149,53 +144,53 @@ box_state <- function(r, n) {
              valid = k <= pmin(a, b))
 }
 
-## All n^2 (n+1) positions of the box, in order.
-arg_states_box <- function(n) {
+## All n^2 (n+1) positions, in order.
+arg_states_full <- function(n) {
   stopifnot(n >= 2, n == round(n))
-  s <- box_state(seq_len(n^2 * (n + 1)), n)
+  s <- index_to_state(seq_len(n^2 * (n + 1)), n)
   rownames(s) <- sprintf("[%d,%d,%d]", s$a, s$b, s$k)   # [a,b,k] labels
   s
 }
 
-## Explicit formula for a single entry P[r, c]   (vectorised in r and c).
+## Explicit formula for a single entry P[r, c].
 ## Returns NA when r is a padding position.
 P_entry <- function(r, c, n, rho) {
-  s <- box_state(r, n); a <- s$a; b <- s$b; k <- s$k
-  B <- n * (n + 1); N1 <- n + 1
+  s <- index_to_state(r, n)
+  a <- s$a; b <- s$b; k <- s$k; i <- s$i; j <- s$j
   D <- choose(a + b - k, 2) + k * rho
   val <- (k * rho                         * (c == r - 1) +
-            (a - k) * (b - k)               * (c == r + 1) +
-            (choose(a, 2) - choose(k, 2))   * (c == r - B) +
-            (choose(b, 2) - choose(k, 2))   * (c == r - N1) +
-            choose(k, 2)                    * (c == r - B - N1 - 1)) / D
+          i * j                           * (c == r + 1) +
+          (choose(a, 2) - choose(k, 2))   * (c == r - n*(n + 1)) +
+          (choose(b, 2) - choose(k, 2))   * (c == r - n - 1) +
+          choose(k, 2)                    * (c == r - n*(n + 1) - n - 2)) / D
   mrca <- a == 1 & b == 1 & k == 1
   val[mrca] <- as.numeric(c == r)[mrca]
   val[!s$valid] <- NA
   val
 }
 
-## Full transition matrix in the box numbering, built from the formula.
+## Full transition matrix building from the formula.
 ##   n        : sample size (>= 2)
 ##   rho      : scaled recombination rate (R = 2 N r in the paper)
 ##   symbolic : TRUE -> character matrix of entries as functions of rho
 ##   sparse   : TRUE -> sparse matrix (package Matrix; ships with R).
 ##              Recommended for large n: at most 5 non-zeros per row.
-arg_transition_matrix_box <- function(n, rho = 1, symbolic = FALSE, sparse = FALSE) {
-  s <- arg_states_box(n)
-  N <- nrow(s); B <- n * (n + 1); N1 <- n + 1
-  a <- s$a; b <- s$b; k <- s$k
-  live <- s$valid & !(a == 1 & b == 1 & k == 1)       # real, non-absorbing rows
-  mrca <- box_index(1, 1, 1, n)
+arg_transition_matrix_full <- function(n, rho = 1, symbolic = FALSE, sparse = FALSE) {
+  s <- arg_states_full(n)
+  N <- nrow(s); N1 <- n + 1; N2 <- n * (n + 1)
+  a <- s$a; b <- s$b; k <- s$k; i <- s$i; j <- s$j
+  live <- s$valid & !(a == 1 & b == 1 & k == 1) # real, non-absorbing rows
+  mrca <- 2 # mrca <- state_to_index(1, 1, 1, n)
   
   ## the five moves: shift in r, constant and rho parts of the numerator
   moves <- list(
-    Re  = list(shift = -1,          c0 = 0 * k,                         cr = k),
-    C2  = list(shift = +1,          c0 = (a - k) * (b - k),             cr = 0 * k),
-    L   = list(shift = -B,          c0 = choose(a, 2) - choose(k, 2),   cr = 0 * k),
-    Rt  = list(shift = -N1,         c0 = choose(b, 2) - choose(k, 2),   cr = 0 * k),
-    C4  = list(shift = -B - N1 - 1, c0 = choose(k, 2),                  cr = 0 * k)
+    Re  = list(shift = -1,           c0 = 0 * k,                       cr = k),
+    C2  = list(shift = +1,           c0 = i * j,                       cr = 0*k),
+    CL  = list(shift = -N2,          c0 = choose(a, 2) - choose(k, 2), cr = 0*k),
+    CR  = list(shift = -N1,          c0 = choose(b, 2) - choose(k, 2), cr = 0*k),
+    C4  = list(shift = -N2 - N1 - 1, c0 = choose(k, 2),                cr = 0*k)
   )
-  d0 <- choose(a + b - k, 2); dr <- k                 # D = d0 + dr * rho
+  d0 <- choose(a + b - k, 2); dr <- k                  # D = d0 + dr * rho
   
   from <- to <- integer(0); c0 <- cr <- numeric(0)
   for (m in moves) {
@@ -226,32 +221,18 @@ arg_transition_matrix_box <- function(n, rho = 1, symbolic = FALSE, sparse = FAL
   P
 }
 
-## Convert a box-numbered matrix (numeric, symbolic or sparse) to the old
-## compact matrix: drop the padding and reorder to the order of arg_states(n).
-box_to_old <- function(Pbox) {
-  N <- nrow(Pbox)
+## Convert a full matrix into the old matrix,
+## drop the padding and reorder to the order of arg_states(n).
+full_to_old <- function(Pfull) {
+  N <- nrow(Pfull)
   n <- round(uniroot(function(x) x^2 * (x + 1) - N, c(1, N))$root)
   if (n^2 * (n + 1) != N) stop("dimension ", N, " is not n^2 (n+1) for any n")
   old <- arg_states(n)                                 # (i, j, k) in old order
-  pos <- box_index(old$i + old$k, old$j + old$k, old$k, n)
-  P <- Pbox[pos, pos, drop = FALSE]
+  pos <- state_to_index(old$i + old$k, old$j + old$k, old$k, n)
+  P <- Pfull[pos, pos, drop = FALSE]
   dimnames(P) <- list(rownames(old), rownames(old))
   attr(P, "states") <- old
   P
-}
-
-## ---- example ---------------------------------------------------------------
-if (sys.nframe() == 0) {
-  P2 <- arg_transition_matrix(2, symbolic = TRUE)             # = Eq. (2)
-  print(noquote(unclass(P2)[, ]))
-  P3 <- arg_transition_matrix(3, rho = 0.5)
-  print(dim(P3)); print(range(rowSums(P3)))
-  
-  ## box numbering, n = 2 (12 x 12, padding rows/columns are zero)
-  B2 <- arg_transition_matrix_box(2, symbolic = TRUE)
-  print(noquote(unclass(B2)[, ]))
-  ## back to the old matrix: identical to Eq. (2) above
-  print(identical(unclass(box_to_old(B2))[, ], unclass(P2)[, ]))
 }
 
 ## ---- example ---------------------------------------------------------------
@@ -260,4 +241,9 @@ if (sys.nframe() == 0) {
   print(noquote(unclass(P2)[, ]))
   P3 <- arg_transition_matrix(3, rho = 0.5)
   print(dim(P3)); print(range(rowSums(P3)))
+  
+  P2_full <- arg_transition_matrix_full(2, symbolic = TRUE)
+  print(noquote(unclass(P2_full)[, ]))
+  ## back to the old matrix
+  print(identical(unclass(full_to_old(P2_full))[, ], unclass(P2)[, ]))
 }
